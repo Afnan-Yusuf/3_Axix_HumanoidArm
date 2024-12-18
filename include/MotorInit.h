@@ -16,6 +16,11 @@ const float STEPS_PER_REV = 200.0;  // Steps per revolution for NEMA 17
 const float MICROSTEPS = 4.0;       // Microstepping setting on your driver
 const float GEAR_RATIO = 5.25;      // Change if using gear reduction
 
+// Maximum speeds and acceleration
+const float MAX_SPEED = 4000;      // Maximum steps per second
+const float MAX_ACCELERATION = 4000; // Maximum acceleration
+
+// Calculate total steps for one degree of rotation
 const float STEPS_PER_DEGREE = (STEPS_PER_REV * MICROSTEPS * GEAR_RATIO) / 360.0;
 
 // Create two instances of AccelStepper for the motors
@@ -30,6 +35,8 @@ float targetRoll = 0.0;
 
 // Flag to track if movement is in progress
 bool isMoving = false;
+
+
 Servo left_elbow_servo;
 Servo right_elbow_servo;
 
@@ -76,7 +83,26 @@ void startMove(float pitch, float roll) {
   long steps1, steps2;
   calculateMotorSteps(pitch, roll, steps1, steps2);
   
-  // Set target positions for both motors
+  // Calculate the absolute distances to move
+  long distance1 = abs(steps1 - motor1.currentPosition());
+  long distance2 = abs(steps2 - motor2.currentPosition());
+  
+  // Find the longer distance
+  long maxDistance = max(distance1, distance2);
+  
+  // Calculate speed ratios to synchronize movement completion
+  float speedRatio1 = distance1 > 0 ? (float)distance1 / maxDistance : 1.0;
+  float speedRatio2 = distance2 > 0 ? (float)distance2 / maxDistance : 1.0;
+  
+  // Set speeds proportionally to maintain synchronization
+  motor1.setMaxSpeed(MAX_SPEED * speedRatio1);
+  motor2.setMaxSpeed(MAX_SPEED * speedRatio2);
+  
+  // Set accelerations proportionally
+  motor1.setAcceleration(MAX_ACCELERATION * speedRatio1);
+  motor2.setAcceleration(MAX_ACCELERATION * speedRatio2);
+  
+  // Set target positions
   motor1.moveTo(steps1);
   motor2.moveTo(steps2);
   
@@ -86,6 +112,11 @@ void startMove(float pitch, float roll) {
   
   // Set moving flag
   isMoving = true;
+  
+  // Debug output
+  Serial.println("Starting synchronized move:");
+  Serial.printf("Distance 1: %ld, Speed 1: %.2f\n", distance1, MAX_SPEED * speedRatio1);
+  Serial.printf("Distance 2: %ld, Speed 2: %.2f\n", distance2, MAX_SPEED * speedRatio2);
 }
 
 // Function to update motor movement (non-blocking)
@@ -104,7 +135,7 @@ void updateMovement() {
       currentRoll = targetRoll;
       
       // Print current position
-      Serial.print("Current Position - Pitch: ");
+      Serial.print("Movement complete - Pitch: ");
       Serial.print(currentPitch);
       Serial.print("° Roll: ");
       Serial.println(currentRoll);

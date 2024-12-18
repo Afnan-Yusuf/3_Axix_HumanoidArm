@@ -8,8 +8,10 @@ void setup() {
 
 void loop() {
   if (!isMovementInProgress()) {
-    startMove(70.0, 720.0);
+    startMove(65.0, 360.0);
+    startMove(65.0, 0.0);
   }
+
   updateMovement();
   
 }

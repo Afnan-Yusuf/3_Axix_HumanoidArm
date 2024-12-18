@@ -4,6 +4,7 @@
 
 #define left_elbow_servopin 12
 #define right_elbow_servopin 13
+
 // Define pin connections
 const int MOTOR1_STEP_PIN = 4;   // Motor 1 step pin
 const int MOTOR1_DIR_PIN = 16;   // Motor 1 direction pin

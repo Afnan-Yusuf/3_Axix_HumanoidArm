@@ -8,9 +8,10 @@ void setup() {
 
 void loop() {
   if (!isMovementInProgress()) {
-    startMove(65.0, 360.0);
-    startMove(65.0, 0.0);
+    startMove(-5, 45.0);
   }
+  right_elbow_servo.write(90);
+  left_elbow_servo.write(90);
 
   updateMovement();
   

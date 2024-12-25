@@ -67,7 +67,7 @@ void calculateMotorSteps(float pitch, float roll, long &steps1, long &steps2) {
 
 // Function to start movement to specified pitch and roll angles
 void startMove(float pitch, float roll) {
-  pitch = constrain(pitch, 0.0, 360.0);
+  pitch = constrain(pitch, -20.0, 20.0);
   roll = constrain(roll, 0.0, 360.0);
   
   long steps1, steps2;

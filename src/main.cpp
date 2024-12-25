@@ -7,12 +7,12 @@ void setup() {
 }
 
 void loop() {
-  if (!isMovementInProgress()) {
-    startMove(-5, 45.0);
+  if (!isAnyWristMoving()) {
+    moveWrists(0, 0, 0, 0);
   }
   right_elbow_servo.write(90);
   left_elbow_servo.write(90);
 
-  updateMovement();
+  updateWristsupdateMovement();
   
 }

@@ -13,6 +13,6 @@ void loop() {
   right_elbow_servo.write(90);
   left_elbow_servo.write(90);
 
-  updateWristsupdateMovement();
+  updateWrists();
   
 }

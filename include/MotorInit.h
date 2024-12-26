@@ -107,12 +107,17 @@ public:
 #define RIGHT_MOTOR2_STEP_PIN 5
 #define RIGHT_MOTOR2_DIR_PIN 4
 
+#define headstepperdirection 18 
+#define headstepperstep 19
+
+#define enablepin 25
+
 // Motor parameters
 const float STEPS_PER_REV = 200.0;
 const float MICROSTEPS = 4.0;
 const float GEAR_RATIO = 5.25;
-const float MAX_SPEED = 4000;
-const float MAX_ACCELERATION = 4000;
+const float MAX_SPEED = 500;
+const float MAX_ACCELERATION = 2000;
 const float STEPS_PER_DEGREE = (STEPS_PER_REV * MICROSTEPS * GEAR_RATIO) / 360.0;
 
 // Create instances for both wrists
@@ -133,6 +138,8 @@ Servo left_elbow_servo;
 Servo right_elbow_servo;
 
 void ArmInit() {
+    pinMode(enablepin, OUTPUT);
+    digitalWrite(enablepin, 0);
     // Initialize servo timers
     ESP32PWM::allocateTimer(0);
     ESP32PWM::allocateTimer(1);
@@ -148,18 +155,24 @@ void ArmInit() {
 }
 
 // Function to move both wrists
+
+void enablesteppers(){
+  digitalWrite(enablepin, 0);
+}
+void disablesteppers(){
+  digitalWrite(enablepin, 1);
+}
 void moveWrists(float leftPitch, float leftRoll, float rightPitch, float rightRoll) {
+    enablesteppers();
     leftWrist.startMove(leftPitch, leftRoll);
     rightWrist.startMove(rightPitch, rightRoll);
 }
 
-// Function to update both wrists
 void updateWrists() {
     leftWrist.updateMovement();
     rightWrist.updateMovement();
 }
 
-// Function to check if either wrist is moving
 bool isAnyWristMoving() {
     return leftWrist.isMovementInProgress() || rightWrist.isMovementInProgress();
 }

@@ -13,6 +13,7 @@ unsigned long walkStartTime = 0;
 char cmd = 's';
 bool walkphase = false;
 
+String msg;
 
 #define RXD2 16
 #define TXD2 17
@@ -29,19 +30,42 @@ void loop()
   if (Serial.available())
   {
     cmd = Serial.read();
+    Serial.println(msg);
+    if(msg == "SPEAK_START"){
+      pinMode(2, OUTPUT);
+      digitalWrite(2, HIGH);
+
+    }else if (msg == "SPEAK_STOP"){
+      pinMode(2, OUTPUT);
+      digitalWrite(2, LOW);
+    }else {
+      //blink led without delay
+      pinMode(2, OUTPUT);
+      digitalWrite(2, HIGH);
+      delay(100);
+      digitalWrite(2, LOW);
+      delay(100);
+
+    }
+    
+
+
+
+
+
     switch (cmd)
     {
     case 'w': 
       isWalking = true;
       walkStartTime = millis();
-      Serial.println("Walking started");
+      //Serial.println("Walking started");
       break;
     case 's':
       isWalking = false;
       moveWrists(0.0, 0, 0.0, 0); // Left shoulder
       left_elbow_servo.write(ELBOW_OFFSET);
       right_elbow_servo.write(ELBOW_OFFSET);
-      Serial.println("Walking stopped");
+      //Serial.println("Walking stopped");
       break;
     case 'd':
       disablesteppers();
@@ -92,12 +116,14 @@ void loop()
       {
         moveWrists(SHOULDER_ROLL_OFFSET, 0, -SHOULDER_ROLL_OFFSET, 30); // Forward swing
         left_elbow_servo.write(90);
+        right_elbow_servo.write(120);
         walkphase = true;
       }
       else
       {
         moveWrists(SHOULDER_ROLL_OFFSET, 30, -SHOULDER_ROLL_OFFSET, 0); // Backward swing
         left_elbow_servo.write(120);
+        right_elbow_servo.write(90);
         walkphase = false;
       }
     }

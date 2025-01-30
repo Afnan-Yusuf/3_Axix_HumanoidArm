@@ -15,7 +15,6 @@ private:
     const float STEPS_PER_DEGREE;
     const float MAX_SPEED;
     const float MAX_ACCELERATION;
-
 public:
     DifferentialWrist(int step1, int dir1, int step2, int dir2, 
                      float stepsPerDeg, float maxSpeed, float maxAccel) :
@@ -176,3 +175,4 @@ void updateWrists() {
 bool isAnyWristMoving() {
     return leftWrist.isMovementInProgress() || rightWrist.isMovementInProgress();
 }
+

@@ -134,7 +134,7 @@ public:
         if (isHomingInProgress) return;
         
         // Constrain input values
-        pitch = constrain(pitch, -20.0, 20.0);
+        pitch = constrain(pitch, -50.0, 50.0);
         roll = constrain(roll, 0.0, 360.0);
         
         targetPitch = pitch;

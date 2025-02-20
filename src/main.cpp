@@ -8,41 +8,49 @@ const float ELBOW_OFFSET = 95.0;
 const int WALK_CYCLE_MS = 2500;
 const float RIGHT_PHASE_OFFSET = 180.0;
 
+float ch3, ch4;
+
+int ch3min = 1172;
+int ch3max = 1970;
+int ch4min = 1010;
+int ch4max = 1970;
+
 // Operation modes
-enum OperationMode {
+enum OperationMode
+{
   MODE_STOP = 0,
   MODE_WALKING = 1,
   MODE_POSITION = 2,
   MODE_CONTINUOUS = 3,
-  MODE_HOMING = 4
+  MODE_HOMING = 4,
+  MODE_PATTERN = 5 // New mode for auto-generated patterns
 };
 
+// Pattern types for automatic movement generation
+enum PatternType
+{
+  PATTERN_SINE = 0,
+  PATTERN_CIRCLE = 1,
+  PATTERN_WAVE = 2,
+  PATTERN_FIGURE8 = 3,
+  PATTERN_RANDOM = 4,
+  PATTERN_COUNT = 5 // Total number of patterns
+};
+
+PatternType currentPattern = PATTERN_SINE;
 OperationMode currentMode = MODE_STOP;
 unsigned long walkStartTime = 0;
 char cmd = 's';
 bool walkphase = false;
 unsigned long lastPositionUpdate = 0;
+unsigned long patternStartTime = 0;
 const unsigned long POSITION_UPDATE_INTERVAL = 20; // 20ms = 50Hz update rate
 
 String msg;
 
-// For continuous input
-#define LEFT_PITCH_POT_PIN 14   // Analog pin for potentiometer input
-#define LEFT_ROLL_POT_PIN 27    // Adjust pins as needed
-#define RIGHT_PITCH_POT_PIN 25
-#define RIGHT_ROLL_POT_PIN 26
-#define LEFT_ELBOW_POT_PIN 32
-#define RIGHT_ELBOW_POT_PIN 33
-
-#define RXD2 16
-#define TXD2 17
-
-
-
-
-
 // Structure to hold joint positions
-struct JointPositions {
+struct JointPositions
+{
   float leftPitch;
   float leftRoll;
   float rightPitch;
@@ -51,21 +59,24 @@ struct JointPositions {
   int rightElbow;
 } currentPos = {0, 0, 0, 0, ELBOW_OFFSET, ELBOW_OFFSET};
 
-// Function to parse position data from serial
-void applyDeadband(float &value, float threshold);
+// Function prototypes
 bool parsePositionData(String data, JointPositions &pos);
-void readContinuousInputs(JointPositions &pos);
 void handlePositionUpdate();
 void processSerialCommand(String command);
+void generatePatternMovement();
+void printPatternInfo();
+void processSerialInput();
 
-
-bool parsePositionData(String data, JointPositions &pos) {
+bool parsePositionData(String data, JointPositions &pos)
+{
   // Expected format: "P,leftPitch,leftRoll,rightPitch,rightRoll,leftElbow,rightElbow"
-  if (data.startsWith("P,")) {
+  if (data.startsWith("P,"))
+  {
     int values[6];
     int startIndex = 2; // Skip "P,"
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 6; i++)
+    {
       int commaIndex = data.indexOf(',', startIndex);
       if (commaIndex == -1 && i < 5)
         return false; // Not enough values
@@ -89,203 +100,375 @@ bool parsePositionData(String data, JointPositions &pos) {
   return false;
 }
 
-// Function to read potentiometer values and map to joint ranges
-void readContinuousInputs(JointPositions &pos) {
-  // Read analog values (0-4095 on ESP32)
-  int leftPitchRaw = analogRead(LEFT_PITCH_POT_PIN);
-  int leftRollRaw = analogRead(LEFT_ROLL_POT_PIN);
-  int rightPitchRaw = analogRead(RIGHT_PITCH_POT_PIN);
-  int rightRollRaw = analogRead(RIGHT_ROLL_POT_PIN);
-  int leftElbowRaw = analogRead(LEFT_ELBOW_POT_PIN);
-  int rightElbowRaw = analogRead(RIGHT_ELBOW_POT_PIN);
-  
-  // Map to appropriate ranges with deadband to prevent jitter
-  pos.leftPitch = map(leftPitchRaw, 0, 4095, -20, 20);
-  pos.leftRoll = map(leftRollRaw, 0, 4095, 0, 360);
-  pos.rightPitch = map(rightPitchRaw, 0, 4095, -20, 20);
-  pos.rightRoll = map(rightRollRaw, 0, 4095, 0, 360);
-  pos.leftElbow = map(leftElbowRaw, 0, 4095, 0, 180);
-  pos.rightElbow = map(rightElbowRaw, 0, 4095, 0, 180);
-  
-  // Apply anti-jitter filtering (optional)
-  applyDeadband(pos.leftPitch, 0.5);
-  applyDeadband(pos.leftRoll, 1.0);
-  applyDeadband(pos.rightPitch, 0.5);
-  applyDeadband(pos.rightRoll, 1.0);
-}
-
-// Apply deadband to prevent small noise from causing movement
-void applyDeadband(float &value, float threshold) {
-  if (abs(value) < threshold) {
-    value = 0;
-  }
-}
-
-void setup() {
+void setup()
+{
   Serial.begin(115200);
-  Serial1.begin(9600, SERIAL_8N1, RXD2, TXD2);
-  
-  // Set up analog input pins
-  analogReadResolution(12); // 12-bit resolution for ESP32
-  analogSetAttenuation(ADC_11db); // Improves analog reading range
-  
+  Serial1.begin(9600, SERIAL_8N1, 16, 17); // RXD2, TXD2
+
   ArmInit();
-  
+
   // Initial LED state
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
-  
+
   // Start with all steppers disabled
   disablesteppers();
+
+  Serial.println("\n\n===== Differential Wrist Control =====");
+  Serial.println("Commands:");
+  Serial.println("  s or STOP - Stop all movement");
+  Serial.println("  w or WALK - Start walking pattern");
+  Serial.println("  h or HOME - Start homing sequence");
+  Serial.println("  p or PATTERN - Start pattern mode");
+  Serial.println("  p0-p4 - Select pattern (sine, circle, wave, figure8, random)");
+  Serial.println("  d or DISABLE - Disable steppers");
+  Serial.println("  e or ENABLE - Enable steppers");
+  Serial.println("  P,lp,lr,rp,rr,le,re - Set position");
+  Serial.println("=====================================");
 }
 
-void handlePositionUpdate() {
+void handlePositionUpdate()
+{
   moveWrists(currentPos.leftPitch, currentPos.leftRoll,
              currentPos.rightPitch, currentPos.rightRoll);
   left_elbow_servo.write(currentPos.leftElbow);
   right_elbow_servo.write(currentPos.rightElbow);
 }
 
-void processSerialCommand(String command) {
+void processSerialCommand(String command)
+{
+  command.trim();
+
   // Check mode change commands first
-  if (command == "STOP" || command == "s") {
+  if (command == "STOP" || command == "s")
+  {
     currentMode = MODE_STOP;
     moveWrists(0.0, 0, 0.0, 0);
     left_elbow_servo.write(ELBOW_OFFSET);
     right_elbow_servo.write(ELBOW_OFFSET);
     Serial.println("Mode: STOP");
     return;
-  } 
-  else if (command == "WALK" || command == "w") {
+  }
+  else if (command == "WALK" || command == "w")
+  {
     currentMode = MODE_WALKING;
     walkStartTime = millis();
     Serial.println("Mode: WALKING");
     return;
   }
-  else if (command == "HOME" || command == "h") {
+  else if (command == "HOME" || command == "h")
+  {
     currentMode = MODE_HOMING;
     startHomingWrists();
     Serial.println("Mode: HOMING");
     return;
   }
-  else if (command == "CONTINUOUS" || command == "c") {
-    currentMode = MODE_CONTINUOUS;
-    Serial.println("Mode: CONTINUOUS INPUT");
+  else if (command == "PATTERN" || command == "p")
+  {
+    currentMode = MODE_PATTERN;
+    patternStartTime = millis();
+    printPatternInfo();
+    Serial.println("Mode: PATTERN GENERATOR");
     return;
   }
-  else if (command == "DISABLE" || command == "d") {
+  else if (command.startsWith("p") && command.length() == 2)
+  {
+    // Pattern selection p0-p4
+    int patternNum = command.charAt(1) - '0';
+    if (patternNum >= 0 && patternNum < PATTERN_COUNT)
+    {
+      currentPattern = (PatternType)patternNum;
+      patternStartTime = millis();
+      printPatternInfo();
+      currentMode = MODE_PATTERN;
+    }
+    return;
+  }
+  else if (command == "DISABLE" || command == "d")
+  {
     disablesteppers();
     Serial.println("Steppers disabled");
     return;
   }
-  else if (command == "ENABLE" || command == "e") {
+  else if (command == "ENABLE" || command == "e")
+  {
     enablesteppers();
     Serial.println("Steppers enabled");
     return;
   }
-  
+
   // Handle position command
   JointPositions newPos = currentPos;
-  if (parsePositionData(command, newPos)) {
+  if (parsePositionData(command, newPos))
+  {
     currentMode = MODE_POSITION;
     currentPos = newPos;
     handlePositionUpdate();
     Serial.println("Mode: POSITION");
   }
-  
+
   // Handle LED commands
-  if (command == "SPEAK_START") {
+  if (command == "SPEAK_START")
+  {
     pinMode(2, OUTPUT);
     digitalWrite(2, HIGH);
-  } 
-  else if (command == "SPEAK_STOP") {
+  }
+  else if (command == "SPEAK_STOP")
+  {
     pinMode(2, OUTPUT);
     digitalWrite(2, LOW);
   }
 }
 
-void loop() {
+void printPatternInfo()
+{
+  Serial.print("Current pattern: ");
+  switch (currentPattern)
+  {
+  case PATTERN_SINE:
+    Serial.println("Sine waves");
+    break;
+  case PATTERN_CIRCLE:
+    Serial.println("Circular motion");
+    break;
+  case PATTERN_WAVE:
+    Serial.println("Wave pattern");
+    break;
+  case PATTERN_FIGURE8:
+    Serial.println("Figure-8 pattern");
+    break;
+  case PATTERN_RANDOM:
+    Serial.println("Smooth random motion");
+    break;
+  default:
+    Serial.println("Unknown");
+    break;
+  }
+}
+
+void generatePatternMovement()
+{
+  // Calculate elapsed time for smooth patterns
+  float elapsed = (millis() - patternStartTime) / 1000.0;
+
+  switch (currentPattern)
+  {
+  case PATTERN_SINE:
+    // Basic sine wave pattern
+    currentPos.leftPitch = 15 * sin(elapsed);
+    currentPos.leftRoll = 180 + 90 * sin(elapsed * 0.5);
+    currentPos.rightPitch = 15 * sin(elapsed + PI);
+    currentPos.rightRoll = 180 + 90 * sin(elapsed * 0.5 + PI);
+    currentPos.leftElbow = 90 + 45 * sin(elapsed * 0.3);
+    currentPos.rightElbow = 90 + 45 * sin(elapsed * 0.3 + PI);
+    break;
+
+  case PATTERN_CIRCLE:
+    // Circular motion
+    currentPos.leftPitch = 15 * sin(elapsed);
+    currentPos.leftRoll = 180 + 90 * cos(elapsed);
+    currentPos.rightPitch = 15 * sin(elapsed + PI);
+    currentPos.rightRoll = 180 + 90 * cos(elapsed + PI);
+    currentPos.leftElbow = 90 + 20 * sin(elapsed * 0.5);
+    currentPos.rightElbow = 90 + 20 * sin(elapsed * 0.5 + PI);
+    break;
+
+  case PATTERN_WAVE:
+    // Waving motion
+    if (int(elapsed) % 4 < 2)
+    {
+      // Left arm waves
+      currentPos.leftPitch = 10 * sin(elapsed * 3);
+      currentPos.leftRoll = 45 + 30 * sin(elapsed * 3);
+      currentPos.rightPitch = -5;
+      currentPos.rightRoll = 0;
+      currentPos.leftElbow = 90 + 30 * sin(elapsed * 3);
+      currentPos.rightElbow = 95;
+    }
+    else
+    {
+      // Right arm waves
+      currentPos.leftPitch = -5;
+      currentPos.leftRoll = 0;
+      currentPos.rightPitch = 10 * sin(elapsed * 3);
+      currentPos.rightRoll = 45 + 30 * sin(elapsed * 3);
+      currentPos.leftElbow = 95;
+      currentPos.rightElbow = 90 + 30 * sin(elapsed * 3);
+    }
+    break;
+
+  case PATTERN_FIGURE8:
+    // Figure-8 pattern
+    currentPos.leftPitch = 15 * sin(elapsed * 2);
+    currentPos.leftRoll = 180 + 90 * sin(elapsed);
+    currentPos.rightPitch = 15 * sin(elapsed * 2 + PI);
+    currentPos.rightRoll = 180 + 90 * sin(elapsed + PI);
+    currentPos.leftElbow = 90 + 20 * cos(elapsed);
+    currentPos.rightElbow = 90 + 20 * cos(elapsed + PI);
+    break;
+
+  case PATTERN_RANDOM:
+    // Smooth random motion using multiple sine waves of different frequencies
+    currentPos.leftPitch = 10 * sin(elapsed) + 5 * sin(elapsed * 2.7) + 3 * sin(elapsed * 4.1);
+    currentPos.leftRoll = 180 + 70 * sin(elapsed * 0.6) + 20 * sin(elapsed * 1.3);
+    currentPos.rightPitch = 10 * sin(elapsed + 1.5) + 5 * sin(elapsed * 2.3) + 3 * sin(elapsed * 3.7);
+    currentPos.rightRoll = 180 + 70 * sin(elapsed * 0.7 + 1) + 20 * sin(elapsed * 1.1);
+    currentPos.leftElbow = 90 + 30 * sin(elapsed * 0.4) + 15 * sin(elapsed * 0.9);
+    currentPos.rightElbow = 90 + 30 * sin(elapsed * 0.4 + 2) + 15 * sin(elapsed * 0.8);
+    break;
+  }
+
+  int  pithcc = map(ch3, ch3min, ch3max, 0, 360);
+  int  rollcc = map(ch4, ch4min, ch4max, -20, 20);
+  // Constrain all values to valid ranges
+  currentPos.leftPitch = rollcc;// constrain(currentPos.leftPitch, -20, 20);
+  currentPos.leftRoll = pithcc;//(currentPos.leftRoll, 0, 360);
+  currentPos.rightPitch =rollcc;// constrain(currentPos.rightPitch, -20, 20);
+  currentPos.rightRoll = pithcc;//(currentPos.rightRoll, 0, 360);
+  currentPos.leftElbow = constrain(currentPos.leftElbow, 0, 180);
+  currentPos.rightElbow = constrain(currentPos.rightElbow, 0, 180);
+}
+
+char prevMsg = '\0';
+void loop()
+{
+  processSerialInput();
   // Process serial input if available
-  if (Serial.available()) {
+  Serial.print(ch3);
+  Serial.print("\t");
+  Serial.println(ch4);
+  if (Serial.available())
+  {
     msg = Serial.readStringUntil('\n');
     Serial.println("Received: " + msg);
     processSerialCommand(msg);
   }
 
-  if (Serial1.available()) {
-    msg = Serial1.readStringUntil('\n');
-    Serial.println("BT Received: " + msg);
-    processSerialCommand(msg);
-  }
+
 
   // Handle different modes
-  switch (currentMode) {
-    case MODE_HOMING:
-      if (!isHomingInProgress()) {
-        if (areWristsHomed()) {
-          Serial.println("Homing completed successfully");
-          currentMode = MODE_STOP;
-        } else {
-          Serial.println("Homing failed");
-          currentMode = MODE_STOP;
+  switch (currentMode)
+  {
+  case MODE_HOMING:
+    if (!isHomingInProgress())
+    {
+      if (areWristsHomed())
+      {
+        Serial.println("Homing completed successfully");
+        currentMode = MODE_STOP;
+      }
+      else
+      {
+        Serial.println("Homing failed");
+        currentMode = MODE_STOP;
+      }
+    }
+    break;
+
+  case MODE_WALKING:
+    // Walking pattern logic
+    if (!isHomingInProgress())
+    { // Don't walk if homing
+      unsigned long currentTime = millis();
+      unsigned long timeInCycle = (currentTime - walkStartTime) % WALK_CYCLE_MS;
+      float phase = float(timeInCycle) / WALK_CYCLE_MS;
+
+      if (!isAnyWristMoving())
+      {
+        if (walkphase == false)
+        {
+          moveWrists(SHOULDER_ROLL_OFFSET, 0, -SHOULDER_ROLL_OFFSET, 30);
+          left_elbow_servo.write(90);
+          right_elbow_servo.write(120);
+          walkphase = true;
+        }
+        else
+        {
+          moveWrists(SHOULDER_ROLL_OFFSET, 30, -SHOULDER_ROLL_OFFSET, 0);
+          left_elbow_servo.write(120);
+          right_elbow_servo.write(90);
+          walkphase = false;
         }
       }
-      break;
-      
-    case MODE_WALKING:
-      // Walking pattern logic
-      if (!isHomingInProgress()) {  // Don't walk if homing
-        unsigned long currentTime = millis();
-        unsigned long timeInCycle = (currentTime - walkStartTime) % WALK_CYCLE_MS;
-        float phase = float(timeInCycle) / WALK_CYCLE_MS;
-        
-        if (!isAnyWristMoving()) {
-          if (walkphase == false) {
-            moveWrists(SHOULDER_ROLL_OFFSET, 0, -SHOULDER_ROLL_OFFSET, 30);
-            left_elbow_servo.write(90);
-            right_elbow_servo.write(120);
-            walkphase = true;
-          } else {
-            moveWrists(SHOULDER_ROLL_OFFSET, 30, -SHOULDER_ROLL_OFFSET, 0);
-            left_elbow_servo.write(120);
-            right_elbow_servo.write(90);
-            walkphase = false;
-          }
-        }
-      }
-      break;
-      
-    case MODE_CONTINUOUS:
-      // Check if it's time to update position (throttle updates)
-      if (millis() - lastPositionUpdate >= POSITION_UPDATE_INTERVAL) {
-        readContinuousInputs(currentPos);
-        handlePositionUpdate();
-        lastPositionUpdate = millis();
-      }
-      break;
-      
-    case MODE_STOP:
-      // In stop mode, we do nothing active but still update motors
-      break;
-      
-    case MODE_POSITION:
-      // In position mode, we've already set the position, just maintain it
-      break;
+    }
+    break;
+
+  case MODE_PATTERN:
+    // Generate dynamic pattern movement every update interval
+    if (millis() - lastPositionUpdate >= POSITION_UPDATE_INTERVAL)
+    {
+      generatePatternMovement();
+      handlePositionUpdate();
+      lastPositionUpdate = millis();
+    }
+    break;
+
+  case MODE_STOP:
+    // In stop mode, we do nothing active but still update motors
+    break;
+
+  case MODE_POSITION:
+    // In position mode, we've already set the position, just maintain it
+    break;
   }
 
   // Always update motors
   updateWrists();
-  
+
   // Report status periodically (optional)
   static unsigned long lastStatusUpdate = 0;
-  if (millis() - lastStatusUpdate > 1000) { // Once per second
-    if (currentMode == MODE_CONTINUOUS) {
-      // Report the current position when in continuous mode
+  if (millis() - lastStatusUpdate > 1000)
+  { // Once per second
+    if (currentMode == MODE_PATTERN)
+    {
+      // Report the current position when in pattern mode
       Serial.printf("Position: LP=%.1f, LR=%.1f, RP=%.1f, RR=%.1f, LE=%d, RE=%d\n",
-                   currentPos.leftPitch, currentPos.leftRoll,
-                   currentPos.rightPitch, currentPos.rightRoll,
-                   currentPos.leftElbow, currentPos.rightElbow);
+                    currentPos.leftPitch, currentPos.leftRoll,
+                    currentPos.rightPitch, currentPos.rightRoll,
+                    currentPos.leftElbow, currentPos.rightElbow);
     }
     lastStatusUpdate = millis();
+  }
+}
+
+String serialBuffer = "";
+bool messageInProgress = false;
+unsigned long lastSerialActivity = 0;
+const unsigned long SERIAL_TIMEOUT = 100; // 100ms timeout
+
+
+void processSerialInput() {
+  // Check for timeout on incomplete message
+  if (messageInProgress && (millis() - lastSerialActivity > SERIAL_TIMEOUT)) {
+    serialBuffer = "";
+    messageInProgress = false;
+  }
+
+  // Process any available serial data without blocking
+  while (Serial1.available()) {
+    char c = Serial1.read();
+    lastSerialActivity = millis();
+    messageInProgress = true;
+
+    if (c == '\n') {
+      // Complete message received
+      if (serialBuffer.length() > 0) {
+        // Parse the data
+        char msg;
+        if (sscanf(serialBuffer.c_str(), "%c,%f,%f", &msg, &ch3, &ch4) >= 1) {
+          if (msg != prevMsg) {
+            processSerialCommand(String(msg));
+            prevMsg = msg;
+          }
+        }
+      }
+      
+      // Reset for next message
+      serialBuffer = "";
+      messageInProgress = false;
+    } else {
+      // Add character to buffer
+      serialBuffer += c;
+    }
   }
 }
